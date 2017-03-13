@@ -5,7 +5,9 @@ Small scripts manly for NGS data analysis
 
 ## getMappingOverhang.pl
 
-### Purpose: finds and accumulates none-mappable overhangs in RNA-seq data.
+### Purpose: 
+
+Finds and accumulates none-mappable overhangs in RNA-seq data.
 
 Extracts soft clipped bases from an input sam file, constructs, characterizes and evaluates consensus sequence of the overhang.
 
@@ -36,23 +38,41 @@ The minimal coverage within the overhang to be used for consensus sequence quali
 
 Output is a table, holding the following infos
 
-* chr chromosome name
+* chr 
 
-* position  chromosome position
+chromosome name
 
-* strand	strand [+-]
+* position  
 
-* length  length of the overhang
+chromosome position
 
-* consensusSeq  consensus sequence of the overhang
+* strand	
 
-* abs_conflictPosition  number of positions in the overhang where at least one reads did not agree with the deduced consensus sequence
+strand [+-]
 
-* rel_conflictPosition  ratio of positions in the overhang where at least one reads did not agree with the deduced consensus sequence
+* length  
 
-* rel_BaseCountA	ratio of bases in all overhang sequences which are A
+length of the overhang
 
-* rel_BaseCountConflicting  ratio of bases in all overhang sequences which do not agree with the deduced consensus sequence (only positions with more than -cc INT reads are considered for Numerator and Denominator)
+* consensusSeq  
+
+consensus sequence of the overhang
+
+* abs_conflictPosition  
+
+number of positions in the overhang where at least one reads did not agree with the deduced consensus sequence
+
+* rel_conflictPosition  
+
+ratio of positions in the overhang where at least one reads did not agree with the deduced consensus sequence
+
+* rel_BaseCountA	
+
+ratio of bases in all overhang sequences which are A
+
+* rel_BaseCountConflicting  
+
+ratio of bases in all overhang sequences which do not agree with the deduced consensus sequence (only positions with more than -cc INT reads are considered for Numerator and Denominator)
 
 ### Usage
 ./getMappingOverhang.pl -l 4 -c 3 -cc 2 < FILE.sam > OUT.tsv
