@@ -10,17 +10,25 @@ use Data::Dumper;
 my %data = (); # holding all data
 
 ## Parameter
-my $clipping_th = 3; # minimal clipping length to consider
-my $initialCoverage = 1; # number of reads at the begining to call transcript attachment
+my $clipping_th       = 4; # minimal clipping length to consider
+my $initialCoverage   = 3; # number of reads at the begining to call transcript attachment
 my $consensusCoverage = 2; # number of reads to evaluate consensus sequence quality
+my $strandedness      = -1; # strandedness: -1 for "+-,-+", 0 for unstranded, +1 for "--,++"
 
 GetOptions(
-  "l"           => \$clipping_th,
-  "c"           => \$initialCoverage,
-  "cc"          => \$consensusCoverage,
-  "man"         => sub{pod2usage(-verbose => 2)},
-  "help|?"      => sub{pod2usage(-verbose => 1)}
+  "l=i"           => \$clipping_th,
+  "c=i"           => \$initialCoverage,
+  "cc=i"          => \$consensusCoverage,
+  "s=i"           => \$strandedness,
+  "man"           => sub{pod2usage(-verbose => 2)},
+  "help|?"        => sub{pod2usage(-verbose => 1)}
     );
+
+# check input variables
+unless ($strandedness == -1 || $strandedness == 1){
+  print STDERR "Error:\tplease specify strandedness of the data; use option -s [-1,1] for this; +1 defines '--,++'; -1 defines '+-,-+' setup\n";
+  exit;
+}
 
 # read in demultiplexed, uniqued, local mapped, single-end sam/bam file
 while(<>){
@@ -31,6 +39,22 @@ while(<>){
 
     # get strand from flag
     my $strand = &parse_strand_bitflag($flag);
+
+    # reverse strands according to library set up
+    if ($strandedness == -1){
+      if ($strand eq '+'){
+        $readSeq = &complementDNA($readSeq);
+	$strand = "-";
+      }
+      else{
+        $strand = "+";
+      }
+    }
+    elsif ($strandedness == 1){
+      if ($strand eq '-'){
+        $readSeq = &complementDNA($readSeq);
+      }
+    }
 
     # get right end from cigar
     my $rightPos = $leftPos + &get_length_from_cigar($cigar);
@@ -74,7 +98,7 @@ while(<>){
 # percentage of readbases which conflict with consensus
 
 # print column header
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", 'chr', 'position', 'strand', 'length', 'consensusSeq', 'abs_conflictPosition', 'rel_conflictPosition', 'rel_BaseCountA', 'rel_BaseCountConflicting';
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", 'chr', 'position', 'strand', 'length', 'readCount', 'consensusSeq', 'abs_conflictPosition', 'rel_conflictPosition', 'rel_BaseCountA', 'rel_BaseCountConflicting';
 foreach my $chr ( sort keys %data ){
   foreach my $strand ( sort keys %{$data{$chr}} ){
     foreach my $position ( sort {$a <=> $b} keys %{$data{$chr}->{$strand}} ){
@@ -108,13 +132,25 @@ foreach my $chr ( sort keys %data ){
           }
         }
       }
-    printf "%s\t%d\t%s\t%d\t%s\t%d\t%.2g\t%.2g\t%.2g\n", $chr, $position, $strand, $length, join("", @consensusSeq), $conflictPos, $conflictPos/$length, $countA/$countTotal, $countConflicting/$countNcovered;
+    printf "%s\t%d\t%s\t%d\t%d\t%s\t%d\t%.2g\t%.2g\t%.2g\n", $chr, $position, $strand, $length, $data{$chr}->{$strand}->{$position}->{clippedReads}, join("", @consensusSeq), $conflictPos, $conflictPos/$length, $countA/$countTotal, $countConflicting/$countNcovered;
     }
   }
 }
 ###################
 ##  SUBROUTINES  ##
 ###################
+
+sub complementDNA {
+  my $seq = shift;
+  $seq=~tr/ACGTacgt/TGCAtgca/;
+  return($seq);
+}
+
+sub complementRNA {
+  my $seq = shift;
+  $seq=~tr/ACGUacgu/UGCAugca/;
+  return($seq);
+}
 
 sub hash_value_sum (\%) {
   my $hash = shift;
@@ -207,23 +243,27 @@ sub get_length_from_cigar {
 
 =head1 NAME
 
-getMappingOverhang.pl [-l INT -c INT -cc INT] [--help|?] [--man] < FILE.sam
+getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FILE.sam
 
 =head1 OPTIONS
 
 =over 4
 
-=item B<-l>
+=item B<-l> <INT>
 
-The minimal length of softclipped overhang to be considered
+The minimal length of softclipped overhang to be considered; (Default: 4)
 
-=item B<-c>
+=item B<-c> <INT>
 
-The minimal coverage at the overhang anchor site to be considered
+The minimal coverage at the overhang anchor site to be considered; (Default: 3)
 
-=item B<-cc>
+=item B<-cc> <INT>
 
-The minimal coverage within the overhang to be used for consensus sequence quality evaluation
+The minimal coverage within the overhang to be used for consensus sequence quality evaluation; (Default: 2)
+
+=item B<-s> <INT>
+
+The strandedness setup of the library. +1 defines '--,++'; -1 defines '+-,-+' setup; (Default: -1)
 
 =item B<--[help|?]>
 
@@ -249,6 +289,8 @@ Output is a table, holding the following infos
 
 =item B<length>  length of the overhang
 
+=item B<readCount>  number of reads with softclipped overhang
+
 =item B<consensusSeq>  consensus sequence of the overhang
 
 =item B<abs_conflictPosition>  number of positions in the overhang where at least one reads did not agree with the deduced consensus sequence
@@ -261,9 +303,9 @@ Output is a table, holding the following infos
 
 =head1 EXAMPLES
 
-./getMappingOverhang.pl -l 4 -c 3 -cc 2 < FILE.sam > OUT.tsv
+./getMappingOverhang.pl -l 4 -c 3 -cc 2 -s -1 < FILE.sam > OUT.tsv
 
-samtools view FILE.bam | ./getMappingOverhang.pl -l 4 -c 3 -cc 2 > OUT.tsv
+samtools view FILE.bam | ./getMappingOverhang.pl -l 4 -c 3 -cc 2 -s +1 > OUT.tsv
 
 =head1 AUTHOR
 
