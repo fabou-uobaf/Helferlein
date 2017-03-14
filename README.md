@@ -12,7 +12,7 @@ Finds and accumulates none-mappable overhangs in RNA-seq data.
 Extracts soft clipped bases from an input sam file, constructs, characterizes and evaluates consensus sequence of the overhang.
 
 ### Synapsis 
-getMappingOverhang.pl [-l INT -c INT -cc INT] [--help|?] [--man] < FILE.sam
+getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FILE.sam
 
 ### Input: 
   * single-end sequencing data
@@ -33,6 +33,10 @@ The minimal coverage at the overhang anchor site to be considered
 * -cc
 
 The minimal coverage within the overhang to be used for consensus sequence quality evaluation
+
+* -s
+
+Defines if the used sequencing library is of a "++,--" or a "+-,-+" set up. Use +1 for the former and -1 for the latter. 
 
 ### Output
 
