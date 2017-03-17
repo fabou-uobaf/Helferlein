@@ -84,3 +84,32 @@ samtools view FILE.bam | ./getMappingOverhang.pl -l 4 -c 3 -cc 2 > OUT.tsv
 
 ### Author
 Fabian Amman, fabian@tbi.univie.ac.at
+
+## deduplicationSeqMap.pl
+
+### Purpose
+
+Checks a sorted input file for consequtive reads with the same mapping characteristics (chromosome, position, CIGAR string, strand) and the same read sequence. If all above characterisitcs are the same as the preceeding read, the read will not be reported. If one of the features differ, the read is reported. On STDERR short stats are reported (number of total reads, kept reads, removed reads)
+
+### Synapsis 
+
+deduplicationSeqMap.pl <FILE.sam> 
+
+### Input: 
+
+Sorted single end SAM file
+
+### Options:
+
+NONE
+
+### Output
+
+SAM file.
+
+### Usage
+
+samtools view -h FILE.bam | ./deduplicationSeqMap.pl 2> DeDup.stats | samtools view -bS - | samtools sort - FILE.dedup
+
+### Author
+Fabian Amman, fabian@tbi.univie.ac.at
