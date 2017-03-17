@@ -7,19 +7,22 @@ use Getopt::Long;
 use Data::Dumper;
 
 ## Variables
-my %data = (); # holding all data
+my %data       = (); # holding all data
+my $readCount  = 0;
 
 ## Parameter
 my $clipping_th       = 4; # minimal clipping length to consider
 my $initialCoverage   = 3; # number of reads at the begining to call transcript attachment
 my $consensusCoverage = 2; # number of reads to evaluate consensus sequence quality
 my $strandedness      = -1; # strandedness: -1 for "+-,-+", 0 for unstranded, +1 for "--,++"
+my $endRestriction    = 3; # consider 3' or 5' or both overhang exclusively [3, 5, 53]
 
 GetOptions(
   "l=i"           => \$clipping_th,
   "c=i"           => \$initialCoverage,
   "cc=i"          => \$consensusCoverage,
   "s=i"           => \$strandedness,
+  "e=i"           => \$endRestriction,
   "man"           => sub{pod2usage(-verbose => 2)},
   "help|?"        => sub{pod2usage(-verbose => 1)}
     );
@@ -29,10 +32,16 @@ unless ($strandedness == -1 || $strandedness == 1){
   print STDERR "Error:\tplease specify strandedness of the data; use option -s [-1,1] for this; +1 defines '--,++'; -1 defines '+-,-+' setup\n";
   exit;
 }
+unless ($endRestriction == 3 || $endRestriction == 5 || $endRestriction == 53){
+  print STDERR "Error:\tplease specify if you want to check for 3', 5' or both overhangs: -e [3, 5, 53]\n";
+  exit;
+}
+
 
 # read in demultiplexed, uniqued, local mapped, single-end sam/bam file
 while(<>){
     next if (m/^@/);
+    $readCount++;
     my @F = split/\t/, $_;
 
     my ($readName, $flag, $chr, $leftPos, $cigar, $readSeq)  = ($F[0], $F[1], $F[2], $F[3], $F[5], $F[9]);
@@ -57,16 +66,42 @@ while(<>){
     }
 
     # get right end from cigar
-    my $rightPos = $leftPos + &get_length_from_cigar($cigar);
+    my $rightPos = $leftPos + &get_length_from_cigar($cigar) ;
 
     # get left softclip length
     # if so: get left softclipped bases
-    my ($leftClipLength, $leftClipSeq) = &get_softclip_info($cigar, $readSeq, 'L');
+    my ($leftClipLength, $leftClipSeq) = (0,'');
+    if ($endRestriction == 3){
+      if($strand eq '-'){
+        ($leftClipLength, $leftClipSeq) = &get_softclip_info($cigar, $readSeq, 'L');
+      }
+    }
+    elsif ($endRestriction == 5){
+      if($strand eq '+'){
+        ($leftClipLength, $leftClipSeq) = &get_softclip_info($cigar, $readSeq, 'L');
+      }
+    }
+    elsif ($endRestriction == 53){
+      ($leftClipLength, $leftClipSeq) = &get_softclip_info($cigar, $readSeq, 'L');
+    }
 
     # get right softclip range
     # if so: get left softclipped bases
-    # if so: get left softclipped bases
-    my ($rightClipLength, $rightClipSeq) = &get_softclip_info($cigar, $readSeq, 'R');
+    my ($rightClipLength, $rightClipSeq) = (0,'');
+
+    if ($endRestriction == 3){
+      if($strand eq '+'){
+        ($rightClipLength, $rightClipSeq) = &get_softclip_info($cigar, $readSeq, 'R');
+      }
+    }
+    elsif ($endRestriction == 5){
+      if($strand eq '-'){
+        ($rightClipLength, $rightClipSeq) = &get_softclip_info($cigar, $readSeq, 'R');
+      }
+    }
+    elsif ($endRestriction == 53){
+      ($rightClipLength, $rightClipSeq) = &get_softclip_info($cigar, $readSeq, 'R');
+    }
 
     # store in %data
     if ($leftClipLength > $clipping_th){
@@ -98,7 +133,7 @@ while(<>){
 # percentage of readbases which conflict with consensus
 
 # print column header
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", 'chr', 'position', 'strand', 'length', 'readCount', 'consensusSeq', 'abs_conflictPosition', 'rel_conflictPosition', 'rel_BaseCountA', 'rel_BaseCountConflicting';
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", 'chr', 'position', 'strand', 'length', 'abs_readCount', 'rpm_readCount', 'consensusSeq', 'abs_conflictPosition', 'rel_conflictPosition', 'rel_BaseCountA', 'rel_BaseCountConflicting';
 foreach my $chr ( sort keys %data ){
   foreach my $strand ( sort keys %{$data{$chr}} ){
     foreach my $position ( sort {$a <=> $b} keys %{$data{$chr}->{$strand}} ){
@@ -132,7 +167,7 @@ foreach my $chr ( sort keys %data ){
           }
         }
       }
-    printf "%s\t%d\t%s\t%d\t%d\t%s\t%d\t%.2g\t%.2g\t%.2g\n", $chr, $position, $strand, $length, $data{$chr}->{$strand}->{$position}->{clippedReads}, join("", @consensusSeq), $conflictPos, $conflictPos/$length, $countA/$countTotal, $countConflicting/$countNcovered;
+    printf "%s\t%d\t%s\t%d\t%d\t%.2f\t%s\t%d\t%.2g\t%.2g\t%.2g\n", $chr, $position, $strand, $length, $data{$chr}->{$strand}->{$position}->{clippedReads}, $data{$chr}->{$strand}->{$position}->{clippedReads}/($readCount/1000000), join("", @consensusSeq), $conflictPos, $conflictPos/$length, $countA/$countTotal, $countConflicting/$countNcovered;
     }
   }
 }
@@ -243,7 +278,7 @@ sub get_length_from_cigar {
 
 =head1 NAME
 
-getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FILE.sam
+getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1] -e [5,3,53]] [--help|?] [--man] < FILE.sam
 
 =head1 OPTIONS
 
@@ -264,6 +299,10 @@ The minimal coverage within the overhang to be used for consensus sequence quali
 =item B<-s> <INT>
 
 The strandedness setup of the library. +1 defines '--,++'; -1 defines '+-,-+' setup; (Default: -1)
+
+=item B<-s> <INT>
+
+Consider only 3' [3], 5' [5[, or both [53] overhangs; (Default:3)
 
 =item B<--[help|?]>
 
