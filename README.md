@@ -22,21 +22,25 @@ getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FI
 
 ### Options:
 
-* -l
+* -l <INT>
 
 The minimal length of softclipped overhang to be considered
 
-* -c
+* -c <INT>
 
 The minimal coverage at the overhang anchor site to be considered
 
-* -cc
+* -cc <INT>
 
 The minimal coverage within the overhang to be used for consensus sequence quality evaluation
 
-* -s
+* -s <STRING>
 
 Defines if the used sequencing library is of a "++,--" or a "+-,-+" set up. Use +1 for the former and -1 for the latter. 
+
+* -e <STRING>
+
+Consider only 3' [3], 5' [5[, or both [53] overhangs; (Default:3)
 
 ### Output
 
@@ -57,6 +61,14 @@ strand [+-]
 * length  
 
 length of the overhang
+
+* absolut read counts
+
+number of reads showing overhang at position in focus
+
+* RPM read counts
+
+reads per million (see absolute read counts) supproting the overhang. 
 
 * consensusSeq  
 
