@@ -328,7 +328,9 @@ Output is a table, holding the following infos
 
 =item B<length>  length of the overhang
 
-=item B<readCount>  number of reads with softclipped overhang
+=item B<abs_readCount>  number of reads with softclipped overhang
+
+=item B<RPM_readCount>  number of reads with softclipped overhang normalized by total mapped mega-reads
 
 =item B<consensusSeq>  consensus sequence of the overhang
 
