@@ -30,7 +30,7 @@ while(<>){
   
   # check if same mapping position of current and previous read
   if ($prevChr eq $currChr && $prevPos == $currPos) {
-    $entry{$currStrand}->{$currSeq}->{&currCIGAR} = $_;
+    $entry{$currStrand}->{$currSeq}->{$currCIGAR} = $_;
   }
   else{
     $samePos++;
@@ -40,13 +40,15 @@ while(<>){
     ($prevChr, $prevPos, $prevStrand, $prevSeq, $prevCIGAR) = ($currChr, $currPos, $currStrand, $currSeq, $currCIGAR);
   }
 }
+$samePos++;
 $kept += &report(\%entry);
 
 if ($total){
   $removed = $total - $kept;
-  printf STDERR "Total reads:\t%d\n", $total;
-  printf STDERR "Reads kept:\t%d\t(%.3f)\n", $kept, $kept/$total;
-  printf STDERR "Reads removed:\t%d\t(%.3f)\n", $removed, $removed/$total;
+  printf STDERR "Total alignments:\t%d\n", $total;
+  printf STDERR "Alignments kept:\t%d\t(%.3f)\n", $kept, $kept/$total;
+  printf STDERR "Alignments removed:\t%d\t(%.3f)\n", $removed, $removed/$total;
+  printf STDERR "Uniq alignment starts:\t%d\t(%.3f)\n", $samePos, $samePos/$total;
 }
 else{
   print STDERR "No reads in the input file\n";
@@ -58,8 +60,8 @@ sub report {
   my $n = 0;
   
   foreach my $k1 (sort keys %$h){
-    foreach my $k2 (sort keys %$h->{$k1}){
-      foreach my $k3 (sort keys %$h->{$k1}->{$k2}){
+    foreach my $k2 (sort keys %{$h->{$k1}}){
+      foreach my $k3 (sort keys %{$h->{$k1}->{$k2}}){
         print "$h->{$k1}->{$k2}->{$k3}\n";
         $n++;
       } 
