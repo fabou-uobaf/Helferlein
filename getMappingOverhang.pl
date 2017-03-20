@@ -46,6 +46,13 @@ while(<>){
 
     my ($readName, $flag, $chr, $leftPos, $cigar, $readSeq)  = ($F[0], $F[1], $F[2], $F[3], $F[5], $F[9]);
 
+    # skip read if unmapped
+    my $mapped = &parse_mapped_bitflag($flag);
+    unless($mapped){
+      print STDERR "Warning:\t$readName not mapped (bit flag: $flag)\n";
+      next;
+    }
+
     # get strand from flag
     my $strand = &parse_strand_bitflag($flag);
 
@@ -243,6 +250,15 @@ sub get_softclip_info{
 
 }
 
+sub parse_mapped_bitflag{
+    my $bitflag = shift;
+    my $mapped  = 1;
+    if($bitflag & 4){
+        $mapped = 0;
+    }
+    
+    return($mapped);
+}
 
 sub parse_strand_bitflag{
     my $bitflag = shift;
