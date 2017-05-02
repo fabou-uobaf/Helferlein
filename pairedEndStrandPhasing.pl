@@ -87,7 +87,7 @@ foreach my $idx (0..$#bams_fh){
 
   my $cmdO = "| $samtools view -bS - | $samtools sort - -T foo > $out";
   open O, $cmdO or die "Error:\tcan't write bam file via <$cmdO>\n";
-  my $cmdI = "$samtools view -h $fh | head -n 10000 | ";
+  my $cmdI = "$samtools view -h $fh | ";
   open I, $cmdI or die "Error:\tcan't read bam file via <$cmdI>\n";
   while(<I>){
     chomp;
