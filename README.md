@@ -1,5 +1,5 @@
 # Helferlein
-Small scripts manly for NGS data analysis
+Small scripts mainly for NGS data analysis
 
 # Description of the scripts
 
@@ -7,7 +7,7 @@ Small scripts manly for NGS data analysis
 
 ### Purpose: 
 
-Finds and accumulates none-mappable overhangs in RNA-seq data.
+Finds and accumulates none-mappable overhangs in RNA-seq reads.
 
 Extracts soft clipped bases from an input sam file, constructs, characterizes and evaluates consensus sequence of the overhang.
 
@@ -15,10 +15,10 @@ Extracts soft clipped bases from an input sam file, constructs, characterizes an
 getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FILE.sam
 
 ### Input: 
-  * single-end sequencing data
-  * locally mapped sam file (e.g., STAR --outFilterScoreMinOverLread 0 --outFilterMatchNminOverLread 0 --outFilterMatchNmin 40 --genomeDir ./STARIDX --readFilesIn reads.fa --alignEndsType Local --alignSoftClipAtReferenceEnds Yes)
-  * use only uniquely mapped reads
-  * removed PCR duplicates
+  * single-end sequencing data (if used with paired end, a work around is to extract /1 or /2 read first)
+  * locally mapped sam file (e.g., STAR --outFilterScoreMinOverLread 0 --outFilterMatchNminOverLread 0 --outFilterMatchNmin 40 --genomeDir ./STARIDX --readFilesIn reads.fa --alignEndsType Local --alignSoftClipAtReferenceEnds Yes, or bwa -L 4)
+  * use only uniquely mapped reads (advised, not mandatory, depending on the analysis)
+  * removed PCR duplicates (advised, not mandatory, depending on the analysis)
 
 ### Options:
 
@@ -28,7 +28,7 @@ The minimal length of softclipped overhang to be considered
 
 * -c <INT>
 
-The minimal coverage at the overhang anchor site to be considered
+The minimal coverage at the overhang anchor site to be reported
 
 * -cc <INT>
 
@@ -40,11 +40,11 @@ Defines if the used sequencing library is of a "++,--" or a "+-,-+" set up. Use 
 
 * -e <STRING>
 
-Consider only 3' [3], 5' [5[, or both [53] overhangs; (Default:3)
+Consider only 3' [3], 5' [5], or both [53] overhangs; (Default:3)
 
 ### Output:
 
-Output is a table, holding the following infos
+Output is a table, holding the following infos in respective column
 
 * chr 
 
@@ -64,15 +64,15 @@ length of the overhang
 
 * absolut read counts
 
-number of reads showing overhang at position in focus
+number of reads with an considered (see argument -l) overhang at the overhang anchor point
 
 * RPM read counts
 
-reads per million (see absolute read counts) supproting the overhang. 
+reads per million ([absolute read counts]/[total mapped reads / 10^6]) supporting the overhang. 
 
 * consensusSeq  
 
-consensus sequence of the overhang
+consensus sequence of the overhang, determined by majority vote in each column of an naive alignment (without any gaps)
 
 * abs_conflictPosition  
 
@@ -88,7 +88,7 @@ ratio of bases in all overhang sequences which are A
 
 * rel_BaseCountConflicting  
 
-ratio of bases in all overhang sequences which do not agree with the deduced consensus sequence (only positions with more than -cc INT reads are considered for Numerator and Denominator)
+ratio of bases in all overhang sequences (in the reads) which do not agree with the deduced consensus sequence (only positions with more than -cc INT reads are considered for Numerator and Denominator)
 
 ### Usage:
 ./getMappingOverhang.pl -l 4 -c 3 -cc 2 < FILE.sam > OUT.tsv
@@ -101,7 +101,7 @@ Fabian Amman, fabian@tbi.univie.ac.at
 
 ### Purpose:
 
-Checks a sorted input file for consequtive reads with the same mapping characteristics (chromosome, position, CIGAR string, strand) and the same read sequence. If all above characterisitcs are the same as the preceeding read, the read will not be reported. If one of the features differ, the read is reported. On STDERR short stats are reported (number of total reads, kept reads, removed reads)
+Checks a sorted input file for consecutive reads with the same mapping characteristics (chromosome, position, CIGAR string, strand) and the identical read sequence. If all above characterisitcs are the same as the preceeding read, the read will not be reported. If one of the features differ, the read is reported. On STDERR short stats are reported (number of total reads, kept reads, removed reads)
 
 ### Synapsis:
 
@@ -150,15 +150,15 @@ Comma-separated list of bam files to be processed.
 
 * --switchfirst 
 
-Flag if alignments classified as first in pair should be strand switched (Default: no action)
+Toggle if alignments classified as first in pair should be strand switched (Default: no action)
 
 * --switchsecond
 
-Flag if alignments classified as second in pair should be strand switched (Default: no action)
+Toggle if alignments classified as second in pair should be strand switched (Default: no action)
 
 * --switchSE
 
-Flag if alignments classified as single-end reads (no read pair) should be strand switched (Default: no action)
+Toggle if alignments classified as single-end reads (no read pair) should be strand switched (Default: no action)
 
 * --samtools <STRING>
 
@@ -174,7 +174,7 @@ Print man-page.
 
 ### Output:
 
-	* bam files with the same name as the input but with the *.strandPhased.bam suffix
+	* bam files with the same name as the input but with *.strandPhased.bam suffix; existing files with the same name will probably be overwritten.
 
 ### Usage:
 
