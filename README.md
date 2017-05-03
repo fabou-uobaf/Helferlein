@@ -183,3 +183,47 @@ perl ./pairedEndStrandPhasing.pl --bams Ecoli_rep1.bam,Ecoli_rep2.bam --switchfi
 ### Author:
 
 Fabian Amman, fabian@tbi.univie.ac.at
+
+
+## FisherExactEnrichment.R
+
+### Purpose: 
+
+Generally makes a two.sided Fisher's Exact test for each line of a table, where each line holds all values for a 2x2 contingency table. Eventually, the obtained p-values are corrected for multiple testing by the method of Benjamin and Hochberg. 
+Particularly, useful to test enrichment or depletion of certain functions in gene sets.
+
+### Synapsis:
+
+R CMD BATCH "--args <FILE>" ../bin/	.R FisherExactEnrichment.Rlog
+
+### Input:
+
+Tab-separated table with the following header:
+
+* functionCode		e.g. arGOC or GO term id
+* functionName		e.g. arGOC function name or GO term name
+* totalGenes		number of genes in the genome/background (total population to be tested - can also be only expressed genes, genes on the chip, etc.)
+* positivGenes		number of genes in the gene subset to be tested for enrichment (e.g., differentially regulated genes)
+* totalGenesWithFunction	number of genes in the genome/background associated with given function
+* positivGenesWithFunction	number of genes in the gene subset associated with given function
+
+### Options:
+
+none
+
+### Output:
+
+Input table with additional columns:
+
+* enrichmentFactor	oberved number of genes with with given function in sub set devided by expected number. Greater 1 for enrichment, less than 1 for depletion.
+* enrichmentSign	verbose classification ('enriched', 'depleted', 'same') for enrichment factors (>3/2, <2/3, <3/2 && >2/3), respectively
+* p.value		Fisher's exact two-sided p-value
+* q.value		P-value adjusted for multiple testing by Benjamini and Hochberg
+
+### Usage:
+
+R CMD BATCH "--args functionCountTable.csv" ../bin/	.R FisherExactEnrichment.Rlog
+
+### Author:
+
+Fabian Amman, fabian@tbi.univie.ac.at
