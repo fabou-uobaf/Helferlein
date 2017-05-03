@@ -15,10 +15,10 @@ Extracts soft clipped bases from an input sam file, constructs, characterizes an
 getMappingOverhang.pl [-l INT -c INT -cc INT -s [-1,+1]] [--help|?] [--man] < FILE.sam
 
 ### Input: 
-  * single-end sequencing data (if used with paired end, a work around is to extract /1 or /2 read first)
-  * locally mapped sam file (e.g., STAR --outFilterScoreMinOverLread 0 --outFilterMatchNminOverLread 0 --outFilterMatchNmin 40 --genomeDir ./STARIDX --readFilesIn reads.fa --alignEndsType Local --alignSoftClipAtReferenceEnds Yes, or bwa -L 4)
-  * use only uniquely mapped reads (advised, not mandatory, depending on the analysis)
-  * removed PCR duplicates (advised, not mandatory, depending on the analysis)
+* single-end sequencing data (if used with paired end, a work around is to extract /1 or /2 read first)
+* locally mapped sam file (e.g., STAR --outFilterScoreMinOverLread 0 --outFilterMatchNminOverLread 0 --outFilterMatchNmin 40 --genomeDir ./STARIDX --readFilesIn reads.fa --alignEndsType Local --alignSoftClipAtReferenceEnds Yes, or bwa -L 4)
+* use only uniquely mapped reads (advised, not mandatory, depending on the analysis)
+* removed PCR duplicates (advised, not mandatory, depending on the analysis)
 
 ### Options:
 
@@ -140,7 +140,7 @@ pairedEndStrandPhasing.pl --bams <BAM1>,<BAM2>,...,<BAMn> [--switchfirst] [--swi
 
 ### Input:
 
-	* bam files
+* bam files
 
 ### Options:
 
@@ -174,7 +174,7 @@ Print man-page.
 
 ### Output:
 
-	* bam files with the same name as the input but with *.strandPhased.bam suffix; existing files with the same name will probably be overwritten.
+* bam files with the same name as the input but with *.strandPhased.bam suffix; existing files with the same name will probably be overwritten.
 
 ### Usage:
 
