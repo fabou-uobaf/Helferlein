@@ -114,6 +114,7 @@ Usefull to produce old style *.rnt *.ptt files from newer file format feature ta
 
 =head1 EXAMPLES
 
+wget ftp://ftp.ncbi.nih.gov/genomes/refseq/bacteria/Escherichia_coli/reference/GCF_000005845.2_ASM584v2/GCF_000005845.2_ASM584v2_feature_table.txt.gz
 perl NCBI_featureTable2rntptt.pl -ft GCF_000005845.2_ASM584v2_feature_table.txt.gz
 
 =head1 AUTHOR
