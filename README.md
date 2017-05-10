@@ -227,3 +227,36 @@ R CMD BATCH "--args functionCountTable.csv" ../bin/	.R FisherExactEnrichment.Rlo
 ### Author:
 
 Fabian Amman, fabian@tbi.univie.ac.at
+
+## NCBI_featureTable2rntptt.pl
+
+### Purpose: 
+
+Usefull to produce old style *.rnt *.ptt files from newer file format feature table as currently provided by NCBI.
+
+### Synapsis:
+
+NCBI_featureTable2rntptt.pl -ft <FILE> [-man] [-help]
+
+### Input: 
+
+NCBI provided feature tables for replicon annotation. Must be gziped.
+
+### Options:
+
+* -ft <FILE>
+
+NCBI provided feature tables for replicon annotation. Must be gziped.
+
+### Output:
+
+Two files with the same basename as the input, with the extensions .rnt (for ncRNA)  and .ptt (for protein coding genes).
+
+### Usage:
+
+wget ftp://ftp.ncbi.nih.gov/genomes/refseq/bacteria/Escherichia_coli/reference/GCF_000005845.2_ASM584v2/GCF_000005845.2_ASM584v2_feature_table.txt.gz
+perl NCBI_featureTable2rntptt.pl -ft GCF_000005845.2_ASM584v2_feature_table.txt.gz
+
+### Author:
+Fabian Amman, fabian@tbi.univie.ac.at
+
