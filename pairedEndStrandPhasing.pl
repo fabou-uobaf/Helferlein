@@ -72,12 +72,12 @@ else{
 }
 
 if ($switchfirst || $switchsecond || $switchSE){
-  print STDERR "Info:\tStand of first in read alignments will be switched.\n" if ($switchfirst);
-  print STDERR "Info:\tStand of second in read alignments will be switched.\n" if ($switchsecond);
-  print STDERR "Info:\tStand of single-end read alignments will be switched.\n" if ($switchSE);
+  print STDERR "Info:\tStrand of first in read alignments will be switched.\n" if ($switchfirst);
+  print STDERR "Info:\tStrand of second in read alignments will be switched.\n" if ($switchsecond);
+  print STDERR "Info:\tStrand of single-end read alignments will be switched.\n" if ($switchSE);
 }
 else{
-  print STDERR "Info:\tStand of no alignments will be switched. Use parameters --switchfirst, --switchsecond or --switchSE to specify reads to be strand switched\n";
+  print STDERR "Info:\tStrand of no alignments will be switched. Use parameters --switchfirst, --switchsecond or --switchSE to specify reads to be strand switched\n";
 }
 
 # process input bam files
