@@ -1,0 +1,550 @@
+#!/usr/bin/perl
+
+######################################################################################################################################
+# strategy: call mismatches, indels, read-ends at previous position from bam-file                                                    #
+#           calculate expected error rate for each subsitution (if less than delta percent show substitution)                        #
+#           calculate expected premature read-ends at previous postion                                                               #
+#           weight expected rates pro-rate (considering multimappers)                                                                #
+#           check for every genomic position the likelihood to see a certain substitution x->!x by change given the background rate  #
+#           merge the p-value likelihoods for all substitutions with Fisher's method                                                 #
+#           adjust p-value for multiple testing                                                                                      #
+######################################################################################################################################
+
+use strict;
+use warnings;
+use Data::Dumper;
+use Getopt::Long;
+use Pod::Usage;
+use Bio::DB::HTS;
+use File::Basename;
+use Math::CDF qw(:all);
+use Statistics::Distributions qw/ chisqrprob /;
+
+## input and options
+my $bam_fhs        = '';                       # input bam file
+my @bam_fhs        = split(/::/,$bam_fhs); 
+my $fasta_fh       = '';                       # reference fasta file
+my $deltabg_th     = 0.5;                      # positions with more relative alternative bases are considered as variances and not sequencing errors
+my $qscore_th      = 20;                       # bases called with a quality score less than this are ignore
+my $coverage_th    = 4;                        # only positions with more than n reads coverage can be called
+my $readTerm_flag  = 0;                        # consider read-ends at position i-1 as "error"
+my $indels_flag    = 0;                        # consider read-ends at position i as error
+my $winsorizeLevel = 1*scalar(@bam_fhs);       # how many values from the list of p-values should be removed (mins/maxs) prior to Fisher's Method
+my $qval_th        = 0.01;                     # positions with a mtc corrected p-value below this will be reported
+my $dataDump_fh    = "Pfropfen_dataTable.csv"; # fileName raw count data should be dumped to
+my $vcf_fh         = "Pfropfen.vcf";           # output file name
+my $verbose        = 0;
+
+## global variables
+my %ErrorRate        = ();
+my %BamReadCount     = ();
+my %readLengthDistro = ();
+my @alphabet         = qw/A C G T/;
+my @time             = ();
+
+## get options from Getopt
+pod2usage(-verbose => 0)
+    unless GetOptions(
+      "bams=s"   => sub{@bam_fhs = split(/::/,$_[1]); },
+      "fasta=s"  => \$fasta_fh,
+      "delta=f"  => \$deltabg_th,
+      "qual=f"   => \$qscore_th,
+      "cov=f"    => \$coverage_th,
+      "term!"    => \$readTerm_flag,
+      "indel!"   => \$indels_flag,
+      "winsor=i" => sub{ $winsorizeLevel = $_[1]*scalar(@bam_fhs);},
+      "pval=f"   => \$qval_th,
+      "data=s"	 => \$dataDump_fh,
+      "out=s"    => \$vcf_fh,
+      "verbose"  => \$verbose,
+      "man"      => sub{pod2usage(-verbose => 2)},
+      "help|?"   => sub{pod2usage(-verbose => 1)}
+    );
+
+## Report parameter in use to log file
+if ($verbose) {
+  print STDERR "LOG:\tbam files: @bam_fhs\n";
+  print STDERR "LOG:\treference fasta: $fasta_fh\n";
+  print STDERR "LOG:\tdelta background threshold to let side contribute to error model: $deltabg_th\n";
+  print STDERR "LOG:\tbase quality threshold to considere sequenced base: $qscore_th\n";
+  print STDERR "LOG:\tcoverage threshold to call side: $coverage_th\n";
+  print STDERR "LOG:\tconsider premature read RT abortion events: $readTerm_flag\n";
+  print STDERR "LOG:\tconsider indels as modification traces: $indels_flag\n";
+  print STDERR "LOG:\twinsorize level of Fisher's Method p-value joining: $winsorizeLevel\n";
+  print STDERR "LOG:\tp-value threshold to call modification site: $qval_th\n";
+  print STDERR "LOG:\tfile name for raw count data dump: $dataDump_fh\n";
+  print STDERR "LOG:\tfile name of output of file: $vcf_fh\n";
+}
+
+## check if input files exist
+unless (@bam_fhs && $fasta_fh){
+  print STDERR "ERROR:\tno bam file or fasta file specified\nAborted!\n";
+  exit;
+}
+
+foreach my $bam_fh (@bam_fhs){
+  if ( ! -e $bam_fh){
+    print STDERR "ERROR:\tbam file ($bam_fh) does not exist\nUse option -bams <FILE1>::>FILE2>::...::<FILEN> to specify\nAborted!\n";
+    exit;
+  }
+}
+if ( ! -e $fasta_fh){
+  print STDERR "ERROR:\tfasta file ($fasta_fh) does not exist\nUse option -fasta <FILE> to specify\nAborted!\n";
+  exit;
+}
+
+
+
+## Start analysis by reading bam files
+foreach my $bam_fh (@bam_fhs){
+  my $sample              = basename($bam_fh, qw/.bam .sam .sam.gz/);
+  
+  ## progress report
+  @time=localtime();
+  print STDERR "PROG:\tstart processing sample $sample: ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+  
+  ## create HTS lib object
+  my $hts = Bio::DB::HTS->new(-bam  =>"$bam_fh",
+			      -fasta => "$fasta_fh"
+      );
+  
+  my @chrIDS = $hts->seq_ids;
+  
+  foreach my $chrId (@chrIDS){
+    
+    ## progress report
+    @time=localtime();
+    print STDERR "PROG:\tdo pileUp chr $chrId ($sample): ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+    
+    ## callback function for HTS pileup
+    my $snp_caller = sub {
+      my ($seqid,$pos,$p) = @_;
+      
+      my $refBase = $hts->segment($seqid,$pos,$pos)->dna;
+      $refBase = uc($refBase);
+      $BamReadCount{$seqid}->{$pos}->{$sample}->{refBase} = $refBase;
+      
+      my ($totalCount,$altCount) = (0,0);
+      my %substi   = ();
+      my $readTerms = ();
+      for my $pileup (@$p) {
+	my $b     = $pileup->alignment;
+	my $readLength = $b->l_qseq;
+	$readLengthDistro{$sample}->{$readLength}++;
+	next if ( $indels_flag && ($pileup->indel || $pileup->is_refskip));
+	
+	my $qBase  = substr($b->qseq,$pileup->qpos,1);
+	$qBase = uc($qBase);
+	next if $qBase =~ /[nN]/;
+	
+	my $qscore = $b->qscore->[$pileup->qpos];
+	next unless ($qscore > $qscore_th);
+	
+	## get NH:i:\d+ aux tag if present
+	my $attributeStr = $b->aux;
+	my $mappingMultiplicity = 1;
+	if($attributeStr=~m/NH:i:(\d+)/){
+	  $mappingMultiplicity = $1;
+	}
+	
+	## count base occurance for background error model
+	$totalCount += (1/$mappingMultiplicity);
+	$substi{$refBase}->{$qBase} += (1/$mappingMultiplicity);
+	$altCount += (1/$mappingMultiplicity) if ($refBase ne $qBase);
+	
+	## count base occurence per position
+	$BamReadCount{$seqid}->{$pos}->{$sample}->{baseCount}->{$qBase}++;
+	$BamReadCount{$seqid}->{$pos}->{$sample}->{totalCount}++;
+      }
+      if ($totalCount && $altCount/$totalCount <= $deltabg_th) {
+	foreach my $qBase (keys %{$substi{$refBase}}){
+	  $ErrorRate{$sample}->{$refBase}->{$qBase} += $substi{$refBase}->{$qBase};
+	  $ErrorRate{$sample}->{$refBase}->{total}  += $substi{$refBase}->{$qBase};
+	}
+      }
+    };
+    
+    
+    $hts->pileup("$chrId",$snp_caller);
+    
+    ## get read ends per position
+    if ( $readTerm_flag ) {
+      
+      my $regularReadLength = &hash_key_to_largest_value(\%{$readLengthDistro{$sample}});
+      
+      print STDERR "PROG:\tregular reads show size $regularReadLength; shorter reads will be considered as premature RT abortion events\n" if ($verbose);
+      
+      my @alignments = $hts->get_features_by_location(-seq_id => "$chrId");
+      
+      ## progress report
+      @time=localtime();
+      print STDERR "PROG:\tdo read-termination analysis chr $chrId ($sample): ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+      
+      
+      foreach my $a (@alignments) {
+	my $qLength = $a->l_qseq;
+	next unless ($qLength < $regularReadLength); #  next unless read terminated premature == shorter than majority of reads
+	#next unless ($qLength <= $regularReadLength);# change <=  to <; only for debugg purpose no menaingful results # next unless read terminated premature == shorter than majority of reads
+	my $qStrand = $a->strand;
+	my $seqid   = $a->seq_id;
+	if ($qStrand == -1 ){
+	  my $qEnd = $a->start;
+	  $qEnd = $qEnd - 1;;
+	  my $qStart = $a->end;
+	  $BamReadCount{$seqid}->{$qEnd}->{$sample}->{readTerms}++;
+	  $BamReadCount{$seqid}->{$qStart}->{$sample}->{readStarts}++;
+	}
+	elsif($qStrand == 1){
+	  my $qEnd = $a->end;
+	  $qEnd = $qEnd+1;
+	  my $qStart = $a->start;
+	  $BamReadCount{$seqid}->{$qEnd}->{$sample}->{readTerms}++;
+	  $BamReadCount{$seqid}->{$qStart}->{$sample}->{readStarts}++;
+	}
+      }
+    }
+  }
+  if ( $readTerm_flag ) {
+    my %preMatureReadEnds = ();
+    foreach my $seqid ( keys %BamReadCount ){
+      
+      ## progress report
+      @time=localtime();
+      print STDERR "PROG:\tdo read-termination round-up chr $seqid ($sample): ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+      
+      foreach my $pos ( keys %{$BamReadCount{$seqid}} ){
+	my $cov          = ( defined($BamReadCount{$seqid}->{$pos}->{$sample}->{totalCount}) )?($BamReadCount{$seqid}->{$pos}->{$sample}->{totalCount}):(0);
+	my $starts       = ( defined($BamReadCount{$seqid}->{$pos}->{$sample}->{readStarts}) )?($BamReadCount{$seqid}->{$pos}->{$sample}->{readStarts}):(0);
+	my $upstreamEnds = ( defined($BamReadCount{$seqid}->{$pos}->{$sample}->{readTerms}) )?($BamReadCount{$seqid}->{$pos}->{$sample}->{readTerms}):(0);
+	my $refBase      = ( defined($BamReadCount{$seqid}->{$pos}->{$sample}->{refBase}) )?($BamReadCount{$seqid}->{$pos}->{$sample}->{refBase}):('N');
+	
+	my $upstreamCoverage = $upstreamEnds+$cov-$starts;
+	$BamReadCount{$seqid}->{$pos}->{$sample}->{upstreamCoverage} = $upstreamCoverage;
+	$BamReadCount{$seqid}->{$pos}->{$sample}->{upstreamTermination} = $upstreamEnds;
+	
+	
+	next if ($upstreamCoverage <= 0);
+	push @{$preMatureReadEnds{$refBase}}, (1+$upstreamEnds)/(1+$upstreamCoverage);
+      }
+    }
+    foreach my $refBase (keys %preMatureReadEnds){
+      $ErrorRate{$sample}->{$refBase}->{preMatureReadTermination} = gmean(@{$preMatureReadEnds{$refBase}});
+    }
+  }
+}
+
+## Calculate Error-rates from observed substitution counts
+foreach my $sample ( keys %ErrorRate ) {
+  foreach my $refBase ( keys %{$ErrorRate{$sample}} ) {
+    foreach my $seenBase ( keys %{$ErrorRate{$sample}->{$refBase}} ){
+      next if ($seenBase eq 'total' || $seenBase eq 'preMatureReadTermination');
+      $ErrorRate{$sample}->{$refBase}->{$seenBase} = $ErrorRate{$sample}->{$refBase}->{$seenBase} / $ErrorRate{$sample}->{$refBase}->{total};
+    }
+  }
+}
+
+
+## Calculate probability to see base substitution based on oberserved error rates
+open D, "> $dataDump_fh" or die "can't write to $dataDump_fh\n";
+foreach my $chrom (sort keys %BamReadCount){
+  
+  ## progress report
+  @time=localtime();
+  print STDERR "PROG:\tdo stats on chr $chrom: ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+  
+  foreach my $position ( sort {$a <=> $b} keys %{$BamReadCount{$chrom}}){
+    my @pvals = ();
+    my @outStore = ();
+    foreach my $sample (sort keys %{$BamReadCount{$chrom}->{$position}}) {
+      
+      my $refBase = ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{refBase}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{refBase}):('N');
+      $BamReadCount{$chrom}->{$position}->{refBase}=$refBase;
+      my $totalBaseCount = ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{totalCount}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{totalCount}):('0');
+      
+      ## skipe positions with less the n reads coverage
+      if ( $totalBaseCount > $coverage_th ) {
+	
+	foreach my $altBase (@alphabet) {
+	  
+	  my $altBaseCount = ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{baseCount}->{$altBase}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{baseCount}->{$altBase}):(0);
+	  my $expectedRate = ( defined($ErrorRate{$sample}->{$refBase}->{$altBase})  && ($ErrorRate{$sample}->{$refBase}->{$altBase} > 10**(-16)) )?($ErrorRate{$sample}->{$refBase}->{$altBase}):(10**(-16));
+	  
+	  if ($altBase eq $refBase){
+	    my $pval = binomialPerl_less( $altBaseCount, $totalBaseCount, $expectedRate );
+	    my $expectedRate_nice = sprintf("%.2g", $expectedRate);
+	    push @outStore, join("\t", $chrom, $position, $sample, "$refBase -> $altBase", "$totalBaseCount -> $altBaseCount (<= $expectedRate_nice)", $pval);
+	  }
+	  else{
+	    
+	    my $pval = binomialPerl_greater( $altBaseCount, $totalBaseCount, $expectedRate );
+	    #my $pval = binomialR( $altBaseCount, $totalBaseCount, $expectedRate );
+	    
+	    $BamReadCount{$chrom}->{$position}->{$sample}->{basePval}->{$altBase}=$pval;
+	    
+	    push @pvals, $pval;
+	    my $expectedRate_nice = sprintf("%.2g", $expectedRate);
+	    push @outStore, join("\t", $chrom, $position, $sample, "$refBase -> $altBase", "$totalBaseCount -> $altBaseCount (>= $expectedRate_nice)", $pval);
+	  }
+	}
+	if ( $readTerm_flag ) {
+	  my $upstreamCoverage =  ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{upstreamCoverage}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{upstreamCoverage}):(0);
+	  my $upstreamTermination = ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{upstreamTermination}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{upstreamTermination}):(0);
+	  my $expectedRate = ( defined($ErrorRate{$sample}->{$refBase}->{preMatureReadTermination})  && ($ErrorRate{$sample}->{$refBase}->{preMatureReadTermination} > 10**(-16)) )?($ErrorRate{$sample}->{$refBase}->{preMatureReadTermination}):(10**(-16));
+	  
+	  my $pval = binomialPerl_greater( $upstreamTermination, $upstreamCoverage, $expectedRate );
+	  
+	  $BamReadCount{$chrom}->{$position}->{$sample}->{basePval}->{preMatureTermination}=$pval;
+	  
+	  push @pvals, $pval;
+	  my $expectedRate_nice = sprintf("%.2g", $expectedRate);
+	  push @outStore, join("\t", $chrom, $position, $sample, "$refBase -> prematureTermination", "$upstreamCoverage -> $upstreamTermination (>= $expectedRate_nice)", $pval);
+	}
+      }
+      else{
+	foreach my $altBase (@alphabet) {
+	  my $altBaseCount = ( defined($BamReadCount{$chrom}->{$position}->{$sample}->{baseCount}->{$altBase}) )?($BamReadCount{$chrom}->{$position}->{$sample}->{baseCount}->{$altBase}):(0);
+	  
+	  push @outStore, join("\t", $chrom, $position, $sample, "$refBase -> $altBase", "$totalBaseCount -> $altBaseCount (NA)", "skipped due to coverage < $coverage_th");
+	}
+      }
+    }
+    @pvals = Winsorizer(\@pvals);
+    my $pval_merged = &FishersMeth(@pvals);
+    
+    $BamReadCount{$chrom}->{$position}->{mergedPval}=$pval_merged;
+    $BamReadCount{$chrom}->{$position}->{usedPvalToMerge}=join(";", @pvals);
+    
+    
+    foreach my $line (@outStore) {
+      print D join("\t", $line, $pval_merged, "[".join(";", @pvals)."]")."\n";
+    }
+  }
+}
+close D;
+
+## progress report
+@time=localtime();
+print STDERR "PROG:\tCorrect for multiple testing: ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+
+## correct for multiple testing
+open V, "> $vcf_fh" or die "Can t write to $vcf_fh\n";
+my (@dataString, @pVals) = ();
+foreach my $chrom (sort keys %BamReadCount){
+  foreach my $position (sort {$a <=> $b} keys %{$BamReadCount{$chrom}}){
+    my $refBase = ( defined($BamReadCount{$chrom}->{$position}->{refBase}) )?($BamReadCount{$chrom}->{$position}->{refBase}):('N');
+    my $dataString = join(":::", $chrom, $position, ".", $refBase, "*");
+    push @dataString, $dataString;
+    push @pVals, $BamReadCount{$chrom}->{$position}->{mergedPval};
+  }
+}
+my $qVals = &MTC(\@pVals);
+
+## report lines with p-val < pval_th 
+foreach my $p (0..$#{$qVals}){
+  my $qVal = $$qVals[$p];
+  next unless ($qVal <= $qval_th);
+  my @data = split/:::/, $dataString[$p];
+  print V join ("\t", @data, sprintf("qVal:%.3g", $qVal))."\n";
+}
+close V;
+
+## progress report
+@time=localtime();
+print STDERR "PROG:\tAnalysis finished: ", join(":", sprintf("%02d", $time[2]), sprintf("%02d", $time[1]), sprintf("%02d", $time[0]))."\n" if ($verbose);
+
+##################
+## sub-routines ##
+##################
+
+sub hash_key_to_largest_value (\%) {
+  my $hash = shift;
+  keys %$hash;
+  
+  my ($large_key, $large_val) = each %$hash;
+  
+  while (my ($key, $val) = each %$hash) {
+    if ($val > $large_val) {
+      $large_val = $val;
+      $large_key = $key;
+    }
+  }
+  return $large_key;
+}
+
+sub gmean {
+  my @arr = @_;
+  my $logSum = 0;
+  my $n      = 0;
+  
+  foreach my $val (@arr){
+    next if ($val <= 0);
+    $logSum += log($val);
+    $n++;
+  }
+  
+  return exp($logSum/$n);
+}
+
+sub binomialPerl_greater {
+  # calculates an exact binomial test with alternative hypothesis "greater"
+  my ($success,$trials,$probs) = @_;
+  
+  if ($success <= 0){
+    return 1;
+  }
+  else{
+    return (1-pbinom( $success -1, $trials, $probs ));
+  }
+}
+
+sub binomialPerl_less {
+  # calculates an exact binomial test with alternative hypothesis "greater"
+  my ($success,$trials,$probs) = @_;
+  
+  
+  return (pbinom( $success, $trials, $probs ));
+}
+
+
+
+sub binomialR {
+  my ($success,$trials,$prob) = @_;
+  
+  if ($trials < 1){
+    return 1;
+  }
+  else{
+    use Statistics::R;
+    
+    my $Rcmd  = "print(binom.test($success,$trials,$prob, alternative='greater')\$p.value)\n";
+    my $R_w = Statistics::R->new() ;
+    $R_w->startR ;
+    $R_w->send(qq`$Rcmd`) ;
+    my $pval = $R_w->read ;
+    $R_w->stopR() ;
+    my @pval = split" ", $pval;
+    return sprintf("%.6g",$pval[1]);
+  }
+}
+
+sub FishersMeth {
+  my @pvals = @_;
+  
+  if (@pvals){
+    my $df = 2*scalar(@pvals);
+    my $chi_squared = 0;
+    foreach my $val (@pvals){
+      my $value = ($val < 10**(-16))?(10**(-16)):($val);
+      $chi_squared += log($value)
+    }
+    $chi_squared = -2*$chi_squared;
+    my $pval = chisqrprob($df, $chi_squared);
+    return sprintf("%.6g",$pval);
+  }
+  else{
+    return sprintf("%.6g",1);
+  }
+}
+
+sub MTC {
+  my ($p) = shift;
+  
+  use Statistics::Multtest qw(BH);
+  
+  my $res = BH($p);
+  
+  return $res;
+}
+
+sub Winsorizer{
+  my ($p) = shift;
+  my @p = sort {$a<=>$b} @$p;
+  my @q = @p[$winsorizeLevel..$#p-$winsorizeLevel];
+  return @q;
+}
+
+##############
+## man page ##
+##############
+
+=pod
+
+=head1 NAME
+
+pfropfen --bams <BAM FILE 1>::<BAM FILE 2>::...::<BAM FILE N> --fasta <REFERENCE FASTA FILE> [--delta <FLOAT> --cov <INT> --qual <FLAOT> --noterm|term --noindel|indel --winsor <INT> --pval <FLOAT> --data <FILE NAME> --out <VCF FILE NAME> -verbose]
+
+=head1 DESCRIPTION
+
+Calls positions from RNA-seq data with error patterns indicating RNA modifications. Base substitutions (default), indels and reverse transcription abortion events can be considered. For each considered event the background error model is defined as the percentage of observed errors given the observed reference base. Each event is tested if it occurs more often than expected given the background model based on the binomial distribution. Each single deduced p-value is merged into a final p-value for each site using the Fisher's method. If replicas are provided this calculation is done over all events and samples for the particular site. Significant sites after multiple testing correction are reported in the VCF file format.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-bams> <FILE::FILE::...>
+
+List of input bam files to be analysed. If several files are provided, separate the file names with '::'
+
+=item B<-fasta> <FILE>
+
+Reference genome sequence in fasta format.
+
+=item B<-delta> <FLOAT>
+
+Only sites with less substitutions then the specifies value are considered for the background error model. (Default = 0.5)
+
+=item B<-qual> <FLOAT>
+
+Only bases with quality score above the specified value are considered. (Default = 20)
+
+=item B<-cov> <INT>
+
+Only sites with a coverage higher than the specified value are considered for modification calling. (Default = 4)
+
+=item B<-term|-noterm>
+
+Toggle if premature read termination are also considered. (Default: no)
+
+=item B<-indel|-noindel>
+
+Toggle if observed indels are also considered as modification trace. (Default: no)
+
+=item B<-winsor> <INT>
+
+The final p-value is calculated with Fisher's Method from the single p-values for each single modification trace (i.e., each base substitution, indels, RT abbortion events). Fisher's Method is thereby only applied to the winsorized set of p-values, meaning the N highest and lowest p-values are remove beforehand. If L replica bam files are provided, L*N are removed. (Default: N = 1)
+
+=item B<-pval> <FLOAT>
+
+Only sites with a multiple testing corrected p-value below this value are reported. (Default = 0.01)
+
+=item B<-data> <FILE>
+
+File name were observed raw counts are verbosely written to. (Default = <Pfropfen_dataTable.csv>)
+
+=item B<-out> <FILE>
+
+File name there the VCF file of the detected, significant modification sites are reported. (Default = <Pfropfen.vcf>)
+
+=item B<-verbose>
+
+Toggle report more detailed diagnosics via STDERR. (Default off)
+
+=item B<--[help|?]>
+
+Print the short version of the man-page.
+
+=item B<--[man]>
+
+Print man-page.
+
+=back
+
+=head1 EXAMPLES
+
+./pfropfen --bams test1.bam::test2.bam --fasta test.fa --delta 0.5 --cov 4 --qual 20 --noterm --noindel --winsor 1 --pval 0.01 --data Pfropfen_dataTable.csv --out Pfropfen.vcf -verbose 1
+
+=head1 AUTHOR
+
+Fabian Amman, fabian@tbi.univie.ac.at
+
+=cut
