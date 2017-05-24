@@ -260,3 +260,85 @@ perl NCBI_featureTable2rntptt.pl -ft GCF_000005845.2_ASM584v2_feature_table.txt.
 ### Author:
 Fabian Amman, fabian@tbi.univie.ac.at
 
+## Pfropfen
+
+### Purpose:
+
+Calls positions from RNA-seq data with error patterns indicating RNA modifications. Base substitutions (default), indels and reverse transcription abortion events can be considered. For each considered event the background error model is defined as the percentage of observed errors given the observed reference base. Each event is tested if it occurs more often than expected given the background model based on the binomial distribution. Each single deduced p-value is merged into a final p-value for each site using the Fisher's method. If replicas are provided this calculation is done over all events and samples for the particular site. Significant sites after multiple testing correction are reported in the VCF file format.
+
+### Synapsis:
+
+pfropfen --bams <BAM FILE 1>::<BAM FILE 2>::...::<BAM FILE N> --fasta <REFERENCE FASTA FILE> [--delta <FLOAT> --cov <INT> --qual <FLAOT> --noterm|term --noindel|indel --winsor <INT> --pval <FLOAT> --data <FILE NAME> --out <VCF FILE NAME> -verbose]
+
+### Input:
+
+One or more bam files and the associated referenec genome n fasta format.
+
+### Options:
+
+* -bams <FILE::FILE::...>
+
+List of input bam files to be analysed. If several files are provided, separate the file names with '::'
+
+* -fasta <FILE>
+
+Reference genome sequence in fasta format.
+
+* -delta <FLOAT>
+
+Only sites with less substitutions then the specifies value are considered for the background error model. (Default = 0.5)
+
+* -qual <FLOAT>
+
+Only bases with quality score above the specified value are considered. (Default = 20)
+
+* -cov <INT>
+
+Only sites with a coverage higher than the specified value are considered for modification calling. (Default = 4)
+
+* -term|-noterm
+
+Toggle if premature read termination are also considered. (Default: no)
+
+* -indel|-noindel
+
+Toggle if observed indels are also considered as modification trace. (Default: no)
+
+* -winsor <INT>
+
+The final p-value is calculated with Fisher's Method from the single p-values for each single modification trace (i.e., each base substitution, indels, RT abbortion events). Fisher's Method is thereby only applied to the winsorized set of p-values, meaning the N highest and lowest p-values are remove beforehand. If L replica bam files are provided, L*N are removed. (Default: N = 1)
+
+* -pval <FLOAT>
+
+Only sites with a multiple testing corrected p-value below this value are reported. (Default = 0.01)
+
+* -data <FILE>
+
+File name were observed raw counts are verbosely written to. (Default = <Pfropfen_dataTable.csv>)
+
+* -out <FILE>
+
+File name there the VCF file of the detected, significant modification sites are reported. (Default = <Pfropfen.vcf>)
+
+* -verbose
+
+Toggle report more detailed diagnosics via STDERR. (Default off)
+
+* --[help|?]
+
+Print the short version of the man-page.
+
+* --[man]
+
+Print man-page.
+
+### Ouput:
+
+List of called modification sites in VCF file format.
+
+### Usage:
+
+./pfropfen --bams test1.bam::test2.bam --fasta test.fa --delta 0.5 --cov 4 --qual 20 --noterm --noindel --winsor 1 --pval 0.01 --data Pfropfen_dataTable.csv --out Pfropfen.vcf -verbose 1
+
+### Author:
+Fabian Amman, fabian@tbi.univie.ac.at
